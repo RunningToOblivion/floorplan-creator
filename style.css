@@ -170,6 +170,30 @@ button:disabled {
   stroke: #b91c1c;
 }
 
+.stair-rect {
+  fill: rgba(14, 165, 233, 0.14);
+  stroke: #0369a1;
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.stair-rect.selected {
+  stroke: #b91c1c;
+}
+
+.stair-step-line {
+  stroke: #0369a1;
+  stroke-width: 1.1;
+  pointer-events: none;
+}
+
+.stair-label {
+  fill: #0f172a;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 .door-symbol {
   fill: #000000;
   cursor: pointer;
@@ -267,6 +291,17 @@ button:disabled {
   pointer-events: none;
 }
 
+.measure-quote {
+  stroke: #7c3aed;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  cursor: pointer;
+}
+
+.measure-quote.selected {
+  stroke: #5b21b6;
+}
+
 .measure-point {
   fill: #7c3aed;
   stroke: #4c1d95;
@@ -279,6 +314,27 @@ button:disabled {
   font-size: 13px;
   font-weight: 700;
   pointer-events: none;
+}
+
+.measure-dialog {
+  border: 1px solid #dbe1e8;
+  border-radius: 12px;
+  padding: 0;
+  width: min(360px, calc(100vw - 32px));
+}
+
+.measure-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.measure-dialog-form {
+  margin: 0;
+  padding: 1rem;
+}
+
+.measure-dialog-form h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1rem;
 }
 
 @media (max-width: 980px) {

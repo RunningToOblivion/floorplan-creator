@@ -34,9 +34,10 @@
           </div>
           <div class="tool-row">
             <button id="addArrowBtn" type="button">Add Arrow</button>
-            <button id="addDoorBtn" type="button">Add Door</button>
+            <button id="addStairBtn" type="button">Add Stairs</button>
           </div>
           <div class="tool-row">
+            <button id="addDoorBtn" type="button">Add Door</button>
             <button id="deleteWallBtn" type="button">Delete Selected</button>
           </div>
           <div class="tool-row single">
@@ -67,14 +68,18 @@
           <div class="tool-content">
           <label class="field">
             <span>Scale (px per cm)</span>
-            <input id="pxPerCmInput" type="number" min="0.1" step="0.1" />
+            <input id="pxPerCmInput" type="number" min="0.001" step="0.001" />
           </label>
           <button id="applyScaleBtn" type="button">Apply Scale To Design</button>
+          <button id="preset4kmBtn" type="button">Set 4 km × 4 km Canvas</button>
           <div class="tool-row">
             <button id="zoomOutBtn" type="button">Zoom -</button>
             <button id="zoomInBtn" type="button">Zoom +</button>
           </div>
-          <button id="fitPlanBtn" type="button">Fit To Plan</button>
+          <div class="tool-row">
+            <button id="fitPlanBtn" type="button">Fit Full Canvas</button>
+            <button id="autoZoomBtn" type="button">Auto Zoom to Plan</button>
+          </div>
           <p id="zoomValue" class="hint">Zoom: 100%</p>
           </div>
         </details>
@@ -102,6 +107,23 @@
         </details>
 
         <details class="tool-section" open>
+          <summary>Selected Stairs</summary>
+          <div class="tool-content">
+          <label class="field">
+            <span>Length (cm)</span>
+            <input id="stairLengthInput" type="number" min="1" step="0.1" />
+          </label>
+
+          <label class="field">
+            <span>Width (cm)</span>
+            <input id="stairWidthInput" type="number" min="1" step="0.1" />
+          </label>
+
+          <button id="applyStairPropsBtn" type="button">Apply Stairs Properties</button>
+          </div>
+        </details>
+
+        <details class="tool-section" open>
           <summary>Project</summary>
           <div class="tool-content">
           <div class="tool-row">
@@ -124,6 +146,7 @@
           </defs>
           <image id="bgImage" href="" x="0" y="0" width="1200" height="800" preserveAspectRatio="xMidYMid meet"></image>
           <g id="wallsLayer"></g>
+          <g id="stairsLayer"></g>
           <g id="doorsLayer"></g>
           <g id="exitsLayer"></g>
           <g id="arrowsLayer"></g>
@@ -132,6 +155,24 @@
         </svg>
       </section>
     </main>
+
+    <dialog id="measureDialog" class="measure-dialog">
+      <form id="measureForm" method="dialog" class="measure-dialog-form">
+        <h2>Edit Measurement</h2>
+        <label class="field">
+          <span>Length (cm)</span>
+          <input id="measureLengthInput" type="number" min="1" step="0.1" required />
+        </label>
+        <label class="field">
+          <span>Orientation (°)</span>
+          <input id="measureAngleInput" type="number" min="-180" max="180" step="1" required />
+        </label>
+        <div class="tool-row">
+          <button id="measureApplyBtn" type="submit">Apply</button>
+          <button id="measureCancelBtn" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="app.js"></script>
   </body>

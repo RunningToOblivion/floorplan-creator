@@ -3,6 +3,7 @@ const bgUpload = document.getElementById('bgUpload');
 const bgImage = document.getElementById('bgImage');
 const clearBgBtn = document.getElementById('clearBgBtn');
 const wallsLayer = document.getElementById('wallsLayer');
+const stairsLayer = document.getElementById('stairsLayer');
 const doorsLayer = document.getElementById('doorsLayer');
 const exitsLayer = document.getElementById('exitsLayer');
 const arrowsLayer = document.getElementById('arrowsLayer');
@@ -12,6 +13,7 @@ const handlesLayer = document.getElementById('handlesLayer');
 const addWallBtn = document.getElementById('addWallBtn');
 const addExitBtn = document.getElementById('addExitBtn');
 const addArrowBtn = document.getElementById('addArrowBtn');
+const addStairBtn = document.getElementById('addStairBtn');
 const addDoorBtn = document.getElementById('addDoorBtn');
 const deleteWallBtn = document.getElementById('deleteWallBtn');
 const duplicateBtn = document.getElementById('duplicateBtn');
@@ -22,13 +24,23 @@ const measureValue = document.getElementById('measureValue');
 const zoomOutBtn = document.getElementById('zoomOutBtn');
 const zoomInBtn = document.getElementById('zoomInBtn');
 const fitPlanBtn = document.getElementById('fitPlanBtn');
+const autoZoomBtn = document.getElementById('autoZoomBtn');
 const zoomValue = document.getElementById('zoomValue');
 const pxPerCmInput = document.getElementById('pxPerCmInput');
 const applyScaleBtn = document.getElementById('applyScaleBtn');
+const preset4kmBtn = document.getElementById('preset4kmBtn');
 const lengthInput = document.getElementById('lengthInput');
 const thicknessInput = document.getElementById('thicknessInput');
 const angleInput = document.getElementById('angleInput');
 const applyPropsBtn = document.getElementById('applyPropsBtn');
+const stairLengthInput = document.getElementById('stairLengthInput');
+const stairWidthInput = document.getElementById('stairWidthInput');
+const applyStairPropsBtn = document.getElementById('applyStairPropsBtn');
+const measureDialog = document.getElementById('measureDialog');
+const measureForm = document.getElementById('measureForm');
+const measureLengthInput = document.getElementById('measureLengthInput');
+const measureAngleInput = document.getElementById('measureAngleInput');
+const measureCancelBtn = document.getElementById('measureCancelBtn');
 
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
@@ -56,9 +68,11 @@ const DOOR_FRAME_MAX_X = 67;
 const DOOR_SYMBOL_BASE_WIDTH = DOOR_FRAME_MAX_X - DOOR_FRAME_MIN_X;
 const DOOR_PATH_D = 'M65,65.6C64.7,40.8,41.2,36.6,35,36v-1c0-0.8-0.7-1.5-1.5-1.5S32,34.2,32,35v30.6h-6.8v2.1H35v-2.1h0V37c2.6,0.3,8.3,1.1,13.9,3.9c10.1,5,15.2,13.5,15.2,25.2c0,0,0,0,0,0.1v1.5h9.8v-2.1H65z';
 const HISTORY_LIMIT = 150;
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 4;
-const ZOOM_STEP = 0.25;
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 600;
+const ZOOM_FACTOR = 1.25;
+const LARGE_CANVAS_SIDE_CM = 400000;
+const LARGE_CANVAS_TARGET_PX = 6000;
 
 const WALL_DEFAULTS_CM = {
   length: 300,
@@ -66,11 +80,18 @@ const WALL_DEFAULTS_CM = {
   angle: 0,
 };
 
+const STAIR_DEFAULTS_CM = {
+  length: 150,
+  width: 120,
+};
+
 const state = {
   walls: [],
+  stairs: [],
   doors: [],
   exits: [],
   arrows: [],
+  measures: [],
   selected: null,
   dragMode: null,
   snapGuide: null,
@@ -91,6 +112,8 @@ const state = {
   history: [],
   historyIndex: -1,
 };
+
+let lastPointerClient = null;
 
 function createId(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
@@ -137,6 +160,10 @@ function wallById(id) {
   return state.walls.find((wall) => wall.id === id) || null;
 }
 
+function stairById(id) {
+  return state.stairs.find((stair) => stair.id === id) || null;
+}
+
 function doorById(id) {
   return state.doors.find((door) => door.id === id) || null;
 }
@@ -149,6 +176,10 @@ function arrowById(id) {
   return state.arrows.find((arrow) => arrow.id === id) || null;
 }
 
+function measureById(id) {
+  return state.measures.find((measure) => measure.id === id) || null;
+}
+
 function selectedEntity() {
   if (!state.selected) {
     return null;
@@ -156,6 +187,9 @@ function selectedEntity() {
 
   if (state.selected.type === 'wall') {
     return { type: 'wall', data: wallById(state.selected.id) };
+  }
+  if (state.selected.type === 'stair') {
+    return { type: 'stair', data: stairById(state.selected.id) };
   }
   if (state.selected.type === 'door') {
     return { type: 'door', data: doorById(state.selected.id) };
@@ -166,6 +200,9 @@ function selectedEntity() {
   if (state.selected.type === 'arrow') {
     return { type: 'arrow', data: arrowById(state.selected.id) };
   }
+  if (state.selected.type === 'measure') {
+    return { type: 'measure', data: measureById(state.selected.id) };
+  }
 
   return null;
 }
@@ -175,6 +212,107 @@ function selectedWall() {
     return null;
   }
   return wallById(state.selected.id);
+}
+
+function handleRadius() {
+  const scaleByUnits = state.pxPerCm / DEFAULT_PX_PER_CM;
+  const zoomFactor = Math.max(1, state.canvas.zoom);
+  const scaled = 7 * scaleByUnits / zoomFactor;
+  return Math.max(0.2, Math.min(7, scaled));
+}
+
+function screenPxToSvg(px) {
+  return Number(px) / Math.max(0.05, state.canvas.zoom);
+}
+
+function clampByScreenPx(valueInSvg, minScreenPx, maxScreenPx) {
+  const minSvg = screenPxToSvg(minScreenPx);
+  const maxSvg = screenPxToSvg(maxScreenPx);
+  return Math.max(minSvg, Math.min(maxSvg, valueInSvg));
+}
+
+function rotateHandleRadius() {
+  return clampByScreenPx(Math.max(0.5, handleRadius() * 2.2), 3.5, 9);
+}
+
+function snapGuideTargetRadius() {
+  return clampByScreenPx(Math.max(0.12, handleRadius() * 0.35), 1.2, 2.8);
+}
+
+function snapGuideSourceRadius() {
+  return clampByScreenPx(Math.max(0.1, handleRadius() * 0.3), 1, 2.3);
+}
+
+function snapGuideLineWidth() {
+  return screenPxToSvg(1.25);
+}
+
+function snapGuideEdgeWidth() {
+  return screenPxToSvg(1.5);
+}
+
+function snapGuidePointStrokeWidth() {
+  return screenPxToSvg(0.9);
+}
+
+function snapGuideSourceStrokeWidth() {
+  return screenPxToSvg(0.8);
+}
+
+function measureLineWidth() {
+  return screenPxToSvg(1.35);
+}
+
+function measureDashLength() {
+  return screenPxToSvg(4.5);
+}
+
+function measureDashGap() {
+  return screenPxToSvg(3);
+}
+
+function measureLabelOffset() {
+  return screenPxToSvg(7);
+}
+
+function measureLabelFontSize() {
+  return screenPxToSvg(11);
+}
+
+function measureHandleRadius() {
+  return clampByScreenPx(handleRadius(), 2.6, 7);
+}
+
+function scaledByCanvasUnits(pxValue) {
+  return Number(pxValue) * (state.pxPerCm / DEFAULT_PX_PER_CM);
+}
+
+function snapDistancePx(basePx, minPx = 0.5) {
+  return Math.max(minPx, scaledByCanvasUnits(basePx));
+}
+
+function pointSnapDistancePx() {
+  return snapDistancePx(POINT_SNAP_DISTANCE_PX);
+}
+
+function moveSnapDistancePx() {
+  return snapDistancePx(MOVE_SNAP_DISTANCE_PX);
+}
+
+function resizeSnapDistancePx() {
+  return snapDistancePx(RESIZE_SNAP_DISTANCE_PX);
+}
+
+function cornerCaptureDistancePx() {
+  return snapDistancePx(CORNER_CAPTURE_DISTANCE_PX);
+}
+
+function cornerPriorityBonusPx() {
+  return snapDistancePx(CORNER_PRIORITY_BONUS_PX, 0.1);
+}
+
+function wallProlongationPx() {
+  return snapDistancePx(WALL_PROLONGATION_PX, 10);
 }
 
 function doorWidthPx() {
@@ -228,9 +366,11 @@ function undoLastChange() {
 function snapshotScene() {
   return {
     walls: structuredClone(state.walls),
+    stairs: structuredClone(state.stairs),
     doors: structuredClone(state.doors),
     exits: structuredClone(state.exits),
     arrows: structuredClone(state.arrows),
+    measures: structuredClone(state.measures),
     selected: structuredClone(state.selected),
     canvas: structuredClone(state.canvas),
     pxPerCm: state.pxPerCm,
@@ -240,14 +380,39 @@ function snapshotScene() {
 
 function restoreScene(snapshot) {
   state.walls = structuredClone(snapshot.walls || []);
+  state.stairs = structuredClone(snapshot.stairs || []);
   state.doors = structuredClone(snapshot.doors || []);
   state.exits = structuredClone(snapshot.exits || []);
   state.arrows = structuredClone(snapshot.arrows || []);
+  state.measures = structuredClone(snapshot.measures || []);
   state.selected = snapshot.selected ? structuredClone(snapshot.selected) : null;
   state.canvas = structuredClone(snapshot.canvas || { width: 1200, height: 800, zoom: 1 });
   state.pxPerCm = Number(snapshot.pxPerCm) > 0 ? Number(snapshot.pxPerCm) : DEFAULT_PX_PER_CM;
   state.backgroundDataUrl = String(snapshot.backgroundDataUrl || '');
   bgImage.setAttribute('href', state.backgroundDataUrl);
+}
+
+function firstSelectableEntity() {
+  if (state.walls[0]) {
+    return { type: 'wall', id: state.walls[0].id };
+  }
+  if (state.stairs[0]) {
+    return { type: 'stair', id: state.stairs[0].id };
+  }
+  if (state.doors[0]) {
+    return { type: 'door', id: state.doors[0].id };
+  }
+  if (state.exits[0]) {
+    return { type: 'exit', id: state.exits[0].id };
+  }
+  if (state.arrows[0]) {
+    return { type: 'arrow', id: state.arrows[0].id };
+  }
+  if (state.measures[0]) {
+    return { type: 'measure', id: state.measures[0].id };
+  }
+
+  return null;
 }
 
 function applyCanvasSizeAndZoom() {
@@ -288,10 +453,16 @@ function pushHistorySnapshot() {
 function updateInputs() {
   const wall = selectedWall();
   const entity = selectedEntity();
+  const stair = state.selected?.type === 'stair' ? stairById(state.selected.id) : null;
 
   const wallPropsDisabled = !wall;
   [lengthInput, thicknessInput, angleInput, applyPropsBtn].forEach((el) => {
     el.disabled = wallPropsDisabled;
+  });
+
+  const stairPropsDisabled = !stair;
+  [stairLengthInput, stairWidthInput, applyStairPropsBtn].forEach((el) => {
+    el.disabled = stairPropsDisabled;
   });
 
   deleteWallBtn.disabled = !entity;
@@ -300,17 +471,27 @@ function updateInputs() {
     lengthInput.value = '';
     thicknessInput.value = '';
     angleInput.value = '';
+  } else {
+    lengthInput.value = roundCm(pxToCm(wall.length));
+    thicknessInput.value = roundCm(pxToCm(wall.thickness));
+    angleInput.value = Math.round(wall.angle);
+  }
+
+  if (!stair) {
+    stairLengthInput.value = '';
+    stairWidthInput.value = '';
     return;
   }
 
-  lengthInput.value = roundCm(pxToCm(wall.length));
-  thicknessInput.value = roundCm(pxToCm(wall.thickness));
-  angleInput.value = Math.round(wall.angle);
+  stairLengthInput.value = roundCm(pxToCm(stair.length));
+  stairWidthInput.value = roundCm(pxToCm(stair.width));
 }
 
 function render() {
   applyCanvasSizeAndZoom();
+  const uiHandleRadius = handleRadius();
   wallsLayer.innerHTML = '';
+  stairsLayer.innerHTML = '';
   doorsLayer.innerHTML = '';
   exitsLayer.innerHTML = '';
   arrowsLayer.innerHTML = '';
@@ -336,7 +517,7 @@ function render() {
       const endHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       endHandle.setAttribute('cx', end.x);
       endHandle.setAttribute('cy', end.y);
-      endHandle.setAttribute('r', 7);
+      endHandle.setAttribute('r', uiHandleRadius);
       endHandle.setAttribute('class', 'handle');
       endHandle.dataset.id = wall.id;
       endHandle.dataset.kind = 'wall-handle-end';
@@ -345,7 +526,7 @@ function render() {
       const startHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       startHandle.setAttribute('cx', wall.x);
       startHandle.setAttribute('cy', wall.y);
-      startHandle.setAttribute('r', 7);
+      startHandle.setAttribute('r', uiHandleRadius);
       startHandle.setAttribute('class', 'handle');
       startHandle.dataset.id = wall.id;
       startHandle.dataset.kind = 'wall-handle-start';
@@ -355,16 +536,53 @@ function render() {
       const midY = (wall.y + end.y) / 2;
       const normalX = -Math.sin(degToRad(wall.angle));
       const normalY = Math.cos(degToRad(wall.angle));
-      const rotateDistance = Math.max(28, wall.thickness + 14);
+      const rotateDistance = screenPxToSvg(24) + Math.min(screenPxToSvg(10), wall.thickness * 0.2);
 
       const rotateHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       rotateHandle.setAttribute('cx', midX + normalX * rotateDistance);
       rotateHandle.setAttribute('cy', midY + normalY * rotateDistance);
-      rotateHandle.setAttribute('r', 7);
+      rotateHandle.setAttribute('r', rotateHandleRadius());
       rotateHandle.setAttribute('class', 'handle rotate-handle');
+      rotateHandle.style.stroke = '#ffffff';
+      rotateHandle.style.strokeWidth = String(screenPxToSvg(1.3));
       rotateHandle.dataset.id = wall.id;
       rotateHandle.dataset.kind = 'wall-handle-rotate';
       handlesLayer.appendChild(rotateHandle);
+    }
+  });
+
+  state.stairs.forEach((stair) => {
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', stair.x);
+    rect.setAttribute('y', stair.y);
+    rect.setAttribute('width', stair.length);
+    rect.setAttribute('height', stair.width);
+    rect.setAttribute('class', `stair-rect ${state.selected?.type === 'stair' && stair.id === state.selected.id ? 'selected' : ''}`);
+    rect.dataset.id = stair.id;
+    rect.dataset.kind = 'stair';
+    stairsLayer.appendChild(rect);
+
+    const stepCount = Math.max(3, Math.min(12, Math.round(stair.width / Math.max(1, screenPxToSvg(14)))));
+    for (let i = 1; i < stepCount; i += 1) {
+      const y = stair.y + (stair.width * i) / stepCount;
+      const stepLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      stepLine.setAttribute('x1', stair.x);
+      stepLine.setAttribute('y1', y);
+      stepLine.setAttribute('x2', stair.x + stair.length);
+      stepLine.setAttribute('y2', y);
+      stepLine.setAttribute('class', 'stair-step-line');
+      stairsLayer.appendChild(stepLine);
+    }
+
+    if (state.selected?.type === 'stair' && stair.id === state.selected.id) {
+      const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      handle.setAttribute('cx', stair.x + stair.length);
+      handle.setAttribute('cy', stair.y + stair.width);
+      handle.setAttribute('r', uiHandleRadius);
+      handle.setAttribute('class', 'handle');
+      handle.dataset.id = stair.id;
+      handle.dataset.kind = 'stair-handle';
+      handlesLayer.appendChild(handle);
     }
   });
 
@@ -417,7 +635,7 @@ function render() {
       const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       handle.setAttribute('cx', door.x + Math.cos(rad) * handleDistance);
       handle.setAttribute('cy', door.y + Math.sin(rad) * handleDistance);
-      handle.setAttribute('r', 7);
+      handle.setAttribute('r', uiHandleRadius);
       handle.setAttribute('class', 'handle');
       handle.dataset.id = door.id;
       handle.dataset.kind = 'door-handle';
@@ -470,7 +688,7 @@ function render() {
       const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       handle.setAttribute('cx', arrow.x2);
       handle.setAttribute('cy', arrow.y2);
-      handle.setAttribute('r', 7);
+      handle.setAttribute('r', uiHandleRadius);
       handle.setAttribute('class', 'handle');
       handle.dataset.id = arrow.id;
       handle.dataset.kind = 'arrow-handle';
@@ -486,6 +704,7 @@ function render() {
       edgeLine.setAttribute('x2', state.snapGuide.targetEdge.end.x);
       edgeLine.setAttribute('y2', state.snapGuide.targetEdge.end.y);
       edgeLine.setAttribute('class', 'snap-guide-target-edge');
+      edgeLine.style.strokeWidth = String(snapGuideEdgeWidth());
       handlesLayer.appendChild(edgeLine);
     }
 
@@ -495,20 +714,23 @@ function render() {
     guideLine.setAttribute('x2', state.snapGuide.target.x);
     guideLine.setAttribute('y2', state.snapGuide.target.y);
     guideLine.setAttribute('class', 'snap-guide-line');
+    guideLine.style.strokeWidth = String(snapGuideLineWidth());
     handlesLayer.appendChild(guideLine);
 
     const targetPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     targetPoint.setAttribute('cx', state.snapGuide.target.x);
     targetPoint.setAttribute('cy', state.snapGuide.target.y);
-    targetPoint.setAttribute('r', 5);
+    targetPoint.setAttribute('r', snapGuideTargetRadius());
     targetPoint.setAttribute('class', 'snap-guide-point');
+    targetPoint.style.strokeWidth = String(snapGuidePointStrokeWidth());
     handlesLayer.appendChild(targetPoint);
 
     const sourcePoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     sourcePoint.setAttribute('cx', state.snapGuide.source.x);
     sourcePoint.setAttribute('cy', state.snapGuide.source.y);
-    sourcePoint.setAttribute('r', 4);
+    sourcePoint.setAttribute('r', snapGuideSourceRadius());
     sourcePoint.setAttribute('class', 'snap-guide-source');
+    sourcePoint.style.strokeWidth = String(snapGuideSourceStrokeWidth());
     handlesLayer.appendChild(sourcePoint);
 
     if (state.snapGuide.label) {
@@ -521,45 +743,95 @@ function render() {
     }
   }
 
-  const measureEnd = state.measure.end || state.measure.hover;
-  if (state.measure.start) {
-    const startPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    startPoint.setAttribute('cx', state.measure.start.x);
-    startPoint.setAttribute('cy', state.measure.start.y);
-    startPoint.setAttribute('r', 4.5);
-    startPoint.setAttribute('class', 'measure-point');
-    measureLayer.appendChild(startPoint);
-  }
+  state.measures.forEach((measure) => {
+    const quoteHitLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    quoteHitLine.setAttribute('x1', measure.x1);
+    quoteHitLine.setAttribute('y1', measure.y1);
+    quoteHitLine.setAttribute('x2', measure.x2);
+    quoteHitLine.setAttribute('y2', measure.y2);
+    quoteHitLine.setAttribute('stroke', 'rgba(0, 0, 0, 0.001)');
+    quoteHitLine.setAttribute('stroke-linecap', 'round');
+    quoteHitLine.style.strokeWidth = String(screenPxToSvg(18));
+    quoteHitLine.style.pointerEvents = 'stroke';
+    quoteHitLine.dataset.id = measure.id;
+    quoteHitLine.dataset.kind = 'measure';
+    measureLayer.appendChild(quoteHitLine);
 
-  if (state.measure.start && measureEnd) {
-    const measureLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    measureLine.setAttribute('x1', state.measure.start.x);
-    measureLine.setAttribute('y1', state.measure.start.y);
-    measureLine.setAttribute('x2', measureEnd.x);
-    measureLine.setAttribute('y2', measureEnd.y);
-    measureLine.setAttribute('class', 'measure-line');
-    measureLayer.appendChild(measureLine);
+    const quoteLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    quoteLine.setAttribute('x1', measure.x1);
+    quoteLine.setAttribute('y1', measure.y1);
+    quoteLine.setAttribute('x2', measure.x2);
+    quoteLine.setAttribute('y2', measure.y2);
+    quoteLine.setAttribute('class', `measure-quote ${state.selected?.type === 'measure' && measure.id === state.selected.id ? 'selected' : ''}`);
+    quoteLine.style.strokeWidth = String(measureLineWidth());
+    quoteLine.style.strokeDasharray = `${measureDashLength()} ${measureDashGap()}`;
+    quoteLine.style.pointerEvents = 'none';
+    quoteLine.dataset.id = measure.id;
+    quoteLine.dataset.kind = 'measure';
+    measureLayer.appendChild(quoteLine);
 
-    const endPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    endPoint.setAttribute('cx', measureEnd.x);
-    endPoint.setAttribute('cy', measureEnd.y);
-    endPoint.setAttribute('r', 4.5);
-    endPoint.setAttribute('class', 'measure-point');
-    measureLayer.appendChild(endPoint);
-
-    const distPx = distance(state.measure.start, measureEnd);
-    const distCm = roundCm(pxToCm(distPx));
-    const midX = (state.measure.start.x + measureEnd.x) / 2;
-    const midY = (state.measure.start.y + measureEnd.y) / 2;
-
+    const distCm = roundCm(pxToCm(distance({ x: measure.x1, y: measure.y1 }, { x: measure.x2, y: measure.y2 })));
+    const midX = (measure.x1 + measure.x2) / 2;
+    const midY = (measure.y1 + measure.y2) / 2;
     const measureLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    measureLabel.setAttribute('x', midX + 8);
-    measureLabel.setAttribute('y', midY - 8);
+    measureLabel.setAttribute('x', midX + measureLabelOffset());
+    measureLabel.setAttribute('y', midY - measureLabelOffset());
     measureLabel.setAttribute('class', 'measure-label');
+    measureLabel.style.fontSize = `${measureLabelFontSize()}px`;
     measureLabel.textContent = `${distCm} cm`;
     measureLayer.appendChild(measureLabel);
 
-    measureValue.textContent = `Distance: ${distCm} cm`;
+    if (state.selected?.type === 'measure' && measure.id === state.selected.id) {
+      const endHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      endHandle.setAttribute('cx', measure.x2);
+      endHandle.setAttribute('cy', measure.y2);
+      endHandle.setAttribute('r', measureHandleRadius());
+      endHandle.setAttribute('class', 'handle');
+      endHandle.dataset.id = measure.id;
+      endHandle.dataset.kind = 'measure-handle-end';
+      handlesLayer.appendChild(endHandle);
+    }
+  });
+
+  const draftEnd = state.measure.end || state.measure.hover;
+  if (state.measure.start && draftEnd) {
+    const draftLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    draftLine.setAttribute('x1', state.measure.start.x);
+    draftLine.setAttribute('y1', state.measure.start.y);
+    draftLine.setAttribute('x2', draftEnd.x);
+    draftLine.setAttribute('y2', draftEnd.y);
+    draftLine.setAttribute('class', 'measure-line');
+    draftLine.style.strokeWidth = String(measureLineWidth());
+    draftLine.style.strokeDasharray = `${measureDashLength()} ${measureDashGap()}`;
+    measureLayer.appendChild(draftLine);
+
+    const startPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    startPoint.setAttribute('cx', state.measure.start.x);
+    startPoint.setAttribute('cy', state.measure.start.y);
+    startPoint.setAttribute('r', screenPxToSvg(2.4));
+    startPoint.setAttribute('class', 'measure-point');
+    measureLayer.appendChild(startPoint);
+
+    const endPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    endPoint.setAttribute('cx', draftEnd.x);
+    endPoint.setAttribute('cy', draftEnd.y);
+    endPoint.setAttribute('r', screenPxToSvg(2.4));
+    endPoint.setAttribute('class', 'measure-point');
+    measureLayer.appendChild(endPoint);
+
+    const draftDistCm = roundCm(pxToCm(distance(state.measure.start, draftEnd)));
+    measureValue.textContent = `Distance: ${draftDistCm} cm`;
+  } else if (state.selected?.type === 'measure') {
+    const selectedMeasure = measureById(state.selected.id);
+    if (selectedMeasure) {
+      const selectedDistCm = roundCm(pxToCm(distance(
+        { x: selectedMeasure.x1, y: selectedMeasure.y1 },
+        { x: selectedMeasure.x2, y: selectedMeasure.y2 },
+      )));
+      measureValue.textContent = `Distance: ${selectedDistCm} cm`;
+    } else {
+      measureValue.textContent = 'Distance: -';
+    }
   } else {
     measureValue.textContent = 'Distance: -';
   }
@@ -571,11 +843,12 @@ function render() {
 }
 
 function addWall() {
+  const spawn = nextSpawnPoint();
   const id = createId('wall');
   const wall = {
     id,
-    x: 180,
-    y: 180,
+    x: spawn.x,
+    y: spawn.y,
     length: cmToPx(WALL_DEFAULTS_CM.length),
     thickness: cmToPx(WALL_DEFAULTS_CM.thickness),
     angle: WALL_DEFAULTS_CM.angle,
@@ -586,27 +859,49 @@ function addWall() {
   commitStateChange();
 }
 
+function addStair() {
+  const spawn = nextSpawnPoint();
+  const id = createId('stair');
+  const length = cmToPx(STAIR_DEFAULTS_CM.length);
+  const width = cmToPx(STAIR_DEFAULTS_CM.width);
+
+  state.stairs.push({
+    id,
+    x: spawn.x - length / 2,
+    y: spawn.y - width / 2,
+    length,
+    width,
+  });
+  state.selected = { type: 'stair', id };
+  commitStateChange();
+}
+
 function addExit() {
+  const spawn = nextSpawnPoint();
   const id = createId('exit');
+  const width = 100;
+  const height = 42;
   state.exits.push({
     id,
-    x: 260,
-    y: 260,
-    width: 100,
-    height: 42,
+    x: spawn.x - width / 2,
+    y: spawn.y - height / 2,
+    width,
+    height,
   });
   state.selected = { type: 'exit', id };
   commitStateChange();
 }
 
 function addArrow() {
+  const spawn = nextSpawnPoint();
+  const length = cmToPx(60);
   const id = createId('arrow');
   state.arrows.push({
     id,
-    x1: 380,
-    y1: 380,
-    x2: 500,
-    y2: 380,
+    x1: spawn.x,
+    y1: spawn.y,
+    x2: spawn.x + length,
+    y2: spawn.y,
   });
   state.selected = { type: 'arrow', id };
   commitStateChange();
@@ -634,18 +929,17 @@ function snapDoorToWall(point, maxDistance) {
 }
 
 function addDoor() {
+  const spawn = nextSpawnPoint();
   const id = createId('door');
-  let x = 320;
-  let y = 220;
+  let x = spawn.x;
+  let y = spawn.y;
   let angle = 0;
 
-  const wall = selectedWall();
-  if (wall) {
-    const start = { x: wall.x, y: wall.y };
-    const end = endPoint(wall);
-    x = (start.x + end.x) / 2;
-    y = (start.y + end.y) / 2;
-    angle = wall.angle;
+  const snap = snapDoorToWall(spawn, doorSnapDistancePx());
+  if (snap) {
+    x = snap.point.x;
+    y = snap.point.y;
+    angle = snap.angle;
   }
 
   state.doors.push({ id, x, y, angle });
@@ -653,9 +947,119 @@ function addDoor() {
   commitStateChange();
 }
 
-function setSelection(type, id) {
+function setSelection(type, id, openDialog = true) {
   state.selected = { type, id };
   render();
+
+  if (type === 'measure' && openDialog) {
+    openMeasureDialog(id);
+  }
+}
+
+function snapMovedMeasure(measure, proposedStart) {
+  const dxOriginal = measure.x2 - measure.x1;
+  const dyOriginal = measure.y2 - measure.y1;
+  const proposedEnd = {
+    x: proposedStart.x + dxOriginal,
+    y: proposedStart.y + dyOriginal,
+  };
+
+  const candidates = [];
+  const startMatch = findClosestSnapMatch(proposedStart, null, moveSnapDistancePx());
+  if (startMatch) {
+    candidates.push({
+      distance: startMatch.distance,
+      dx: startMatch.point.x - proposedStart.x,
+      dy: startMatch.point.y - proposedStart.y,
+      guide: {
+        source: proposedStart,
+        target: startMatch.point,
+        label: startMatch.label,
+        targetEdge: startMatch.targetEdge,
+      },
+    });
+  }
+
+  const endMatch = findClosestSnapMatch(proposedEnd, null, moveSnapDistancePx());
+  if (endMatch) {
+    candidates.push({
+      distance: endMatch.distance,
+      dx: endMatch.point.x - proposedEnd.x,
+      dy: endMatch.point.y - proposedEnd.y,
+      guide: {
+        source: proposedEnd,
+        target: endMatch.point,
+        label: endMatch.label,
+        targetEdge: endMatch.targetEdge,
+      },
+    });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      x1: proposedStart.x,
+      y1: proposedStart.y,
+      x2: proposedEnd.x,
+      y2: proposedEnd.y,
+      guide: null,
+    };
+  }
+
+  candidates.sort((a, b) => a.distance - b.distance);
+  const best = candidates[0];
+  return {
+    x1: proposedStart.x + best.dx,
+    y1: proposedStart.y + best.dy,
+    x2: proposedEnd.x + best.dx,
+    y2: proposedEnd.y + best.dy,
+    guide: best.guide,
+  };
+}
+
+function measureLengthPx(measure) {
+  return distance({ x: measure.x1, y: measure.y1 }, { x: measure.x2, y: measure.y2 });
+}
+
+function measureAngleDeg(measure) {
+  return (Math.atan2(measure.y2 - measure.y1, measure.x2 - measure.x1) * 180) / Math.PI;
+}
+
+function openMeasureDialog(measureId) {
+  const measure = measureById(measureId);
+  if (!measure || !measureDialog) {
+    return;
+  }
+
+  measureLengthInput.value = String(roundCm(pxToCm(measureLengthPx(measure))));
+  measureAngleInput.value = String(Math.round(measureAngleDeg(measure)));
+  measureDialog.dataset.measureId = measure.id;
+  if (!measureDialog.open) {
+    measureDialog.showModal();
+  }
+}
+
+function applyMeasureDialog() {
+  const measureId = measureDialog?.dataset?.measureId;
+  if (!measureId) {
+    return;
+  }
+
+  const measure = measureById(measureId);
+  if (!measure) {
+    return;
+  }
+
+  const lengthCm = Number(measureLengthInput.value);
+  const angleDeg = Number(measureAngleInput.value);
+  if (!Number.isFinite(lengthCm) || lengthCm <= 0 || !Number.isFinite(angleDeg)) {
+    return;
+  }
+
+  const lengthPx = cmToPx(lengthCm);
+  const rad = degToRad(angleDeg);
+  measure.x2 = measure.x1 + Math.cos(rad) * lengthPx;
+  measure.y2 = measure.y1 + Math.sin(rad) * lengthPx;
+  commitStateChange();
 }
 
 function deleteSelectedItem() {
@@ -665,6 +1069,10 @@ function deleteSelectedItem() {
 
   if (state.selected.type === 'wall') {
     state.walls = state.walls.filter((w) => w.id !== state.selected.id);
+  }
+
+  if (state.selected.type === 'stair') {
+    state.stairs = state.stairs.filter((s) => s.id !== state.selected.id);
   }
 
   if (state.selected.type === 'door') {
@@ -679,7 +1087,14 @@ function deleteSelectedItem() {
     state.arrows = state.arrows.filter((a) => a.id !== state.selected.id);
   }
 
-  state.selected = state.walls[0] ? { type: 'wall', id: state.walls[0].id } : null;
+  if (state.selected.type === 'measure') {
+    state.measures = state.measures.filter((m) => m.id !== state.selected.id);
+    if (measureDialog?.open) {
+      measureDialog.close();
+    }
+  }
+
+  state.selected = firstSelectableEntity();
   commitStateChange();
 }
 
@@ -874,9 +1289,9 @@ function snapCandidateIsValid(movingWall, source, target, movingWallId) {
   return true;
 }
 
-function closestPointMatch(sourcePoint, targetWallId, maxDistance, prolongationPx = WALL_PROLONGATION_PX) {
+function closestPointMatch(sourcePoint, targetWallId, maxDistance, prolongationPx = wallProlongationPx()) {
   let best = null;
-  const cornerMaxDistance = Math.max(maxDistance, CORNER_CAPTURE_DISTANCE_PX);
+  const cornerMaxDistance = Math.max(maxDistance, cornerCaptureDistancePx());
 
   state.walls.forEach((targetWall) => {
     if (targetWall.id === targetWallId) {
@@ -887,7 +1302,7 @@ function closestPointMatch(sourcePoint, targetWallId, maxDistance, prolongationP
 
     geometry.corners.forEach((targetCorner) => {
       const d = distance(sourcePoint, targetCorner);
-      const score = d - CORNER_PRIORITY_BONUS_PX;
+      const score = d - cornerPriorityBonusPx();
       if (d <= cornerMaxDistance && (!best || score < best.score || (score === best.score && d < best.distance))) {
         best = {
           source: sourcePoint,
@@ -989,7 +1404,7 @@ function edgeToEdgeMatch(movingEdgeStart, movingEdgeEnd, targetWallId, maxDistan
             movingEdgeStart,
             targetEdgeStart,
             targetEdgeEnd,
-            WALL_PROLONGATION_PX,
+            wallProlongationPx(),
           ),
         },
         {
@@ -998,7 +1413,7 @@ function edgeToEdgeMatch(movingEdgeStart, movingEdgeEnd, targetWallId, maxDistan
             movingEdgeEnd,
             targetEdgeStart,
             targetEdgeEnd,
-            WALL_PROLONGATION_PX,
+            wallProlongationPx(),
           ),
         },
         {
@@ -1075,7 +1490,7 @@ function findClosestSnapPoint(pointer, currentWallId, maxDistance) {
 }
 
 function snapPointToWalls(pointer, currentWallId) {
-  return findClosestSnapPoint(pointer, currentWallId, POINT_SNAP_DISTANCE_PX) || pointer;
+  return findClosestSnapPoint(pointer, currentWallId, pointSnapDistancePx()) || pointer;
 }
 
 function nearestMovingFeatures(geometry, pointer) {
@@ -1148,7 +1563,7 @@ function snapMovedWallStart(wall, proposedStart, pointer) {
 
   sourceFeatures.forEach((feature) => {
     if (feature.kind === 'corner') {
-      const cornerMatch = closestPointMatch(feature.source, wall.id, MOVE_SNAP_DISTANCE_PX);
+      const cornerMatch = closestPointMatch(feature.source, wall.id, moveSnapDistancePx());
       if (cornerMatch) {
         considerCandidate({
           source: feature.source,
@@ -1167,7 +1582,7 @@ function snapMovedWallStart(wall, proposedStart, pointer) {
         feature.edgeStart,
         feature.edgeEnd,
         wall.id,
-        MOVE_SNAP_DISTANCE_PX,
+        moveSnapDistancePx(),
       );
       considerCandidate(edgeMatch);
 
@@ -1175,7 +1590,7 @@ function snapMovedWallStart(wall, proposedStart, pointer) {
         feature.edgeStart,
         feature.edgeEnd,
         wall.id,
-        MOVE_SNAP_DISTANCE_PX,
+        moveSnapDistancePx(),
       );
       considerCandidate(edgeCornerMatch);
     }
@@ -1228,16 +1643,120 @@ function svgPoint(evt) {
   return { x: transformed.x, y: transformed.y };
 }
 
+function clientToSvgPoint(clientX, clientY) {
+  const pt = editor.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  const transformed = pt.matrixTransform(editor.getScreenCTM().inverse());
+  return { x: transformed.x, y: transformed.y };
+}
+
+function clampPointToCanvas(point) {
+  return {
+    x: Math.max(0, Math.min(state.canvas.width, point.x)),
+    y: Math.max(0, Math.min(state.canvas.height, point.y)),
+  };
+}
+
+function viewportCenterSvgPoint() {
+  const viewport = editor.parentElement;
+  if (!viewport) {
+    return {
+      x: state.canvas.width / 2,
+      y: state.canvas.height / 2,
+    };
+  }
+
+  return {
+    x: (viewport.scrollLeft + viewport.clientWidth / 2) / state.canvas.zoom,
+    y: (viewport.scrollTop + viewport.clientHeight / 2) / state.canvas.zoom,
+  };
+}
+
+function nextSpawnPoint() {
+  const lastWall = state.walls[state.walls.length - 1];
+  if (lastWall) {
+    const offset = Math.max(6, scaledByCanvasUnits(PASTE_OFFSET_PX));
+    return clampPointToCanvas({
+      x: lastWall.x + offset,
+      y: lastWall.y + offset,
+    });
+  }
+
+  const viewport = editor.parentElement;
+  if (lastPointerClient && viewport) {
+    const rect = viewport.getBoundingClientRect();
+    const withinViewport =
+      lastPointerClient.x >= rect.left &&
+      lastPointerClient.x <= rect.right &&
+      lastPointerClient.y >= rect.top &&
+      lastPointerClient.y <= rect.bottom;
+
+    if (withinViewport) {
+      return clampPointToCanvas(clientToSvgPoint(lastPointerClient.x, lastPointerClient.y));
+    }
+  }
+
+  return clampPointToCanvas(viewportCenterSvgPoint());
+}
+
 function startDrag(evt) {
   evt.preventDefault();
-  if (state.measure.active) {
+  lastPointerClient = { x: evt.clientX, y: evt.clientY };
+  const measureHandleEnd = evt.target.closest('[data-kind="measure-handle-end"]');
+  const measureQuote = evt.target.closest('[data-kind="measure"]');
+
+  if (measureHandleEnd) {
+    const id = measureHandleEnd.dataset.id;
+    state.selected = { type: 'measure', id };
+    state.dragMode = { type: 'resize-measure', id, didMutate: false };
+    render();
+    return;
+  }
+
+  if (measureQuote) {
+    const id = measureQuote.dataset.id;
+    const measure = measureById(id);
+    if (!measure) {
+      return;
+    }
     const pointer = svgPoint(evt);
+    setSelection('measure', id, false);
+    state.dragMode = {
+      type: 'move-measure',
+      id,
+      dx: pointer.x - measure.x1,
+      dy: pointer.y - measure.y1,
+      didMutate: false,
+    };
+    return;
+  }
+
+  if (state.measure.active) {
+    const pointer = snapPointToWalls(svgPoint(evt), null);
     if (!state.measure.start || state.measure.end) {
       state.measure.start = pointer;
       state.measure.end = null;
       state.measure.hover = pointer;
     } else {
       state.measure.end = pointer;
+      if (distance(state.measure.start, state.measure.end) >= 1) {
+        const id = createId('measure');
+        state.measures.push({
+          id,
+          x1: state.measure.start.x,
+          y1: state.measure.start.y,
+          x2: state.measure.end.x,
+          y2: state.measure.end.y,
+        });
+        state.selected = { type: 'measure', id };
+        state.measure.start = null;
+        state.measure.end = null;
+        state.measure.hover = null;
+        commitStateChange();
+        openMeasureDialog(id);
+        return;
+      }
       state.measure.hover = null;
     }
     state.snapGuide = null;
@@ -1250,6 +1769,8 @@ function startDrag(evt) {
   const wallHandleStart = evt.target.closest('[data-kind="wall-handle-start"]');
   const wallHandleEnd = evt.target.closest('[data-kind="wall-handle-end"]');
   const wallHandleRotate = evt.target.closest('[data-kind="wall-handle-rotate"]');
+  const stairRect = evt.target.closest('.stair-rect');
+  const stairHandle = evt.target.closest('[data-kind="stair-handle"]');
   const doorSymbol = evt.target.closest('.door-symbol');
   const doorHandle = evt.target.closest('[data-kind="door-handle"]');
   const arrowLine = evt.target.closest('.arrow-line');
@@ -1302,6 +1823,28 @@ function startDrag(evt) {
     const id = arrowHandle.dataset.id;
     setSelection('arrow', id);
     state.dragMode = { type: 'resize-arrow', id, didMutate: false };
+    return;
+  }
+
+  if (stairHandle) {
+    const id = stairHandle.dataset.id;
+    setSelection('stair', id);
+    state.dragMode = { type: 'resize-stair', id, didMutate: false };
+    return;
+  }
+
+  if (stairRect) {
+    const id = stairRect.dataset.id;
+    setSelection('stair', id);
+    const stair = stairById(id);
+    const pointer = svgPoint(evt);
+    state.dragMode = {
+      type: 'move-stair',
+      id,
+      dx: pointer.x - stair.x,
+      dy: pointer.y - stair.y,
+      didMutate: false,
+    };
     return;
   }
 
@@ -1370,9 +1913,11 @@ function startDrag(evt) {
 }
 
 function onPointerMove(evt) {
+  lastPointerClient = { x: evt.clientX, y: evt.clientY };
+
   if (state.measure.active) {
     if (state.measure.start && !state.measure.end) {
-      state.measure.hover = svgPoint(evt);
+      state.measure.hover = snapPointToWalls(svgPoint(evt), null);
       render();
     }
     return;
@@ -1383,6 +1928,71 @@ function onPointerMove(evt) {
   }
 
   const pointer = svgPoint(evt);
+
+  if (state.dragMode.type === 'resize-measure') {
+    const measure = measureById(state.dragMode.id);
+    if (!measure) {
+      return;
+    }
+
+    const snapped = snapPointToWalls(pointer, null);
+    measure.x2 = snapped.x;
+    measure.y2 = snapped.y;
+    state.dragMode.didMutate = true;
+    state.snapGuide = null;
+    render();
+    return;
+  }
+
+  if (state.dragMode.type === 'move-measure') {
+    const measure = measureById(state.dragMode.id);
+    if (!measure) {
+      return;
+    }
+
+    const proposedStart = {
+      x: pointer.x - state.dragMode.dx,
+      y: pointer.y - state.dragMode.dy,
+    };
+    const moved = snapMovedMeasure(measure, proposedStart);
+    measure.x1 = moved.x1;
+    measure.y1 = moved.y1;
+    measure.x2 = moved.x2;
+    measure.y2 = moved.y2;
+    state.dragMode.didMutate = true;
+    state.snapGuide = moved.guide;
+    render();
+    return;
+  }
+
+  if (state.dragMode.type === 'move-stair') {
+    const stair = stairById(state.dragMode.id);
+    if (!stair) {
+      return;
+    }
+
+    stair.x = pointer.x - state.dragMode.dx;
+    stair.y = pointer.y - state.dragMode.dy;
+    state.dragMode.didMutate = true;
+    state.snapGuide = null;
+    render();
+    return;
+  }
+
+  if (state.dragMode.type === 'resize-stair') {
+    const stair = stairById(state.dragMode.id);
+    if (!stair) {
+      return;
+    }
+
+    const minSide = Math.max(1, cmToPx(10));
+    stair.length = Math.max(minSide, pointer.x - stair.x);
+    stair.width = Math.max(minSide, pointer.y - stair.y);
+    state.dragMode.didMutate = true;
+    state.snapGuide = null;
+    render();
+    return;
+  }
 
   if (state.dragMode.type === 'move-exit') {
     const exitItem = exitById(state.dragMode.id);
@@ -1570,7 +2180,7 @@ function onPointerMove(evt) {
       const match = closestPointMatch(
         candidate.source,
         wall.id,
-        RESIZE_SNAP_DISTANCE_PX,
+        resizeSnapDistancePx(),
         resizeProlongationPx,
       );
       if (!match) {
@@ -1662,6 +2272,16 @@ function cloneForPaste(type, data, offset) {
     };
   }
 
+  if (type === 'stair') {
+    return {
+      id: createId('stair'),
+      x: data.x + offset,
+      y: data.y + offset,
+      length: data.length,
+      width: data.width,
+    };
+  }
+
   if (type === 'exit') {
     return {
       id: createId('exit'),
@@ -1669,6 +2289,16 @@ function cloneForPaste(type, data, offset) {
       y: data.y + offset,
       width: data.width,
       height: data.height,
+    };
+  }
+
+  if (type === 'measure') {
+    return {
+      id: createId('measure'),
+      x1: data.x1 + offset,
+      y1: data.y1 + offset,
+      x2: data.x2 + offset,
+      y2: data.y2 + offset,
     };
   }
 
@@ -1703,12 +2333,18 @@ function pasteCopied() {
   if (state.clipboard.type === 'wall') {
     state.walls.push(pasted);
     state.selected = { type: 'wall', id: pasted.id };
+  } else if (state.clipboard.type === 'stair') {
+    state.stairs.push(pasted);
+    state.selected = { type: 'stair', id: pasted.id };
   } else if (state.clipboard.type === 'door') {
     state.doors.push(pasted);
     state.selected = { type: 'door', id: pasted.id };
   } else if (state.clipboard.type === 'exit') {
     state.exits.push(pasted);
     state.selected = { type: 'exit', id: pasted.id };
+  } else if (state.clipboard.type === 'measure') {
+    state.measures.push(pasted);
+    state.selected = { type: 'measure', id: pasted.id };
   } else {
     state.arrows.push(pasted);
     state.selected = { type: 'arrow', id: pasted.id };
@@ -1737,20 +2373,178 @@ function toggleMeasureMode() {
 }
 
 function clearMeasure() {
+  state.measures = [];
   state.measure.start = null;
   state.measure.end = null;
   state.measure.hover = null;
-  render();
+  if (state.selected?.type === 'measure') {
+    state.selected = null;
+  }
+  if (measureDialog?.open) {
+    measureDialog.close();
+  }
+  commitStateChange();
 }
 
 function setZoom(nextZoom) {
-  state.canvas.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+  const viewport = editor.parentElement;
+  const previousZoom = state.canvas.zoom;
+  const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+
+  if (!viewport || previousZoom <= 0) {
+    state.canvas.zoom = clampedZoom;
+    render();
+    return;
+  }
+
+  const selectedCenter = selectedEntityCenter();
+  const fallbackCenter = {
+    x: (viewport.scrollLeft + viewport.clientWidth / 2) / previousZoom,
+    y: (viewport.scrollTop + viewport.clientHeight / 2) / previousZoom,
+  };
+  const focus = selectedCenter || fallbackCenter;
+
+  state.canvas.zoom = clampedZoom;
   render();
+
+  viewport.scrollLeft = Math.max(0, focus.x * state.canvas.zoom - viewport.clientWidth / 2);
+  viewport.scrollTop = Math.max(0, focus.y * state.canvas.zoom - viewport.clientHeight / 2);
+}
+
+function selectedEntityCenter() {
+  const entity = selectedEntity();
+  if (!entity?.data) {
+    return null;
+  }
+
+  if (entity.type === 'wall') {
+    const end = endPoint(entity.data);
+    return {
+      x: (entity.data.x + end.x) / 2,
+      y: (entity.data.y + end.y) / 2,
+    };
+  }
+
+  if (entity.type === 'stair') {
+    return {
+      x: entity.data.x + entity.data.length / 2,
+      y: entity.data.y + entity.data.width / 2,
+    };
+  }
+
+  if (entity.type === 'door') {
+    return {
+      x: entity.data.x,
+      y: entity.data.y,
+    };
+  }
+
+  if (entity.type === 'exit') {
+    return {
+      x: entity.data.x + entity.data.width / 2,
+      y: entity.data.y + entity.data.height / 2,
+    };
+  }
+
+  if (entity.type === 'measure') {
+    return {
+      x: (entity.data.x1 + entity.data.x2) / 2,
+      y: (entity.data.y1 + entity.data.y2) / 2,
+    };
+  }
+
+  return {
+    x: (entity.data.x1 + entity.data.x2) / 2,
+    y: (entity.data.y1 + entity.data.y2) / 2,
+  };
 }
 
 function fitCanvasToPlan() {
   state.canvas.zoom = 1;
   render();
+}
+
+function currentPlanBounds() {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const includePoint = (x, y) => {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+
+  state.walls.forEach((wall) => {
+    const geometry = wallSnapGeometry(wall);
+    geometry.corners.forEach((corner) => includePoint(corner.x, corner.y));
+  });
+
+  state.stairs.forEach((stair) => {
+    includePoint(stair.x, stair.y);
+    includePoint(stair.x + stair.length, stair.y + stair.width);
+  });
+
+  state.doors.forEach((door) => {
+    const half = doorWidthPx() / 2;
+    includePoint(door.x - half, door.y - half);
+    includePoint(door.x + half, door.y + half);
+  });
+
+  state.exits.forEach((exitItem) => {
+    includePoint(exitItem.x, exitItem.y);
+    includePoint(exitItem.x + exitItem.width, exitItem.y + exitItem.height);
+  });
+
+  state.arrows.forEach((arrow) => {
+    includePoint(arrow.x1, arrow.y1);
+    includePoint(arrow.x2, arrow.y2);
+  });
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+
+  return { minX, minY, maxX, maxY };
+}
+
+function centerViewportOn(bounds) {
+  const viewport = editor.parentElement;
+  if (!viewport) {
+    return;
+  }
+
+  const centerX = ((bounds.minX + bounds.maxX) / 2) * state.canvas.zoom;
+  const centerY = ((bounds.minY + bounds.maxY) / 2) * state.canvas.zoom;
+  viewport.scrollLeft = Math.max(0, centerX - viewport.clientWidth / 2);
+  viewport.scrollTop = Math.max(0, centerY - viewport.clientHeight / 2);
+}
+
+function autoZoomToPlan() {
+  const bounds = currentPlanBounds();
+  if (!bounds) {
+    fitCanvasToPlan();
+    return;
+  }
+
+  const viewport = editor.parentElement;
+  if (!viewport) {
+    fitCanvasToPlan();
+    return;
+  }
+
+  const padding = 80;
+  const planWidth = Math.max(1, bounds.maxX - bounds.minX);
+  const planHeight = Math.max(1, bounds.maxY - bounds.minY);
+  const availableWidth = Math.max(100, viewport.clientWidth - padding);
+  const availableHeight = Math.max(100, viewport.clientHeight - padding);
+  const targetZoom = Math.min(availableWidth / planWidth, availableHeight / planHeight);
+
+  state.canvas.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom));
+  render();
+  centerViewportOn(bounds);
 }
 
 function applyPxPerCmScale() {
@@ -1766,12 +2560,24 @@ function applyPxPerCmScale() {
   }
 
   const ratio = nextPxPerCm / current;
+  applyScaleRatio(ratio);
+  state.pxPerCm = nextPxPerCm;
+  commitStateChange();
+}
 
+function applyScaleRatio(ratio) {
   state.walls.forEach((wall) => {
     wall.x *= ratio;
     wall.y *= ratio;
     wall.length *= ratio;
     wall.thickness *= ratio;
+  });
+
+  state.stairs.forEach((stair) => {
+    stair.x *= ratio;
+    stair.y *= ratio;
+    stair.length *= ratio;
+    stair.width *= ratio;
   });
 
   state.doors.forEach((door) => {
@@ -1793,11 +2599,27 @@ function applyPxPerCmScale() {
     arrow.y2 *= ratio;
   });
 
-  state.pxPerCm = nextPxPerCm;
+  state.measures.forEach((measure) => {
+    measure.x1 *= ratio;
+    measure.y1 *= ratio;
+    measure.x2 *= ratio;
+    measure.y2 *= ratio;
+  });
   state.snapGuide = null;
   state.measure.start = null;
   state.measure.end = null;
   state.measure.hover = null;
+}
+
+function setCanvasTo4KmPreset() {
+  const nextPxPerCm = LARGE_CANVAS_TARGET_PX / LARGE_CANVAS_SIDE_CM;
+  const ratio = nextPxPerCm / state.pxPerCm;
+
+  applyScaleRatio(ratio);
+  state.pxPerCm = nextPxPerCm;
+  state.canvas.width = LARGE_CANVAS_TARGET_PX;
+  state.canvas.height = LARGE_CANVAS_TARGET_PX;
+  state.canvas.zoom = 1;
 
   commitStateChange();
 }
@@ -1874,6 +2696,34 @@ function applySelectedProperties() {
   commitStateChange();
 }
 
+function applySelectedStairProperties() {
+  if (state.selected?.type !== 'stair') {
+    return;
+  }
+
+  const stair = stairById(state.selected.id);
+  if (!stair) {
+    return;
+  }
+
+  const lengthCm = Number(stairLengthInput.value);
+  const widthCm = Number(stairWidthInput.value);
+
+  if (!Number.isFinite(lengthCm) || lengthCm <= 0) {
+    alert('Stair length must be a positive number.');
+    return;
+  }
+
+  if (!Number.isFinite(widthCm) || widthCm <= 0) {
+    alert('Stair width must be a positive number.');
+    return;
+  }
+
+  stair.length = cmToPx(lengthCm);
+  stair.width = cmToPx(widthCm);
+  commitStateChange();
+}
+
 function importBackground(file) {
   if (!file) {
     return;
@@ -1901,7 +2751,7 @@ function importBackground(file) {
 
 function exportProject() {
   const payload = {
-    version: 2,
+    version: 3,
     unit: 'cm',
     pxPerCm: state.pxPerCm,
     canvas: state.canvas,
@@ -1913,6 +2763,13 @@ function exportProject() {
       lengthCm: roundCm(pxToCm(w.length)),
       thicknessCm: roundCm(pxToCm(w.thickness)),
       angle: roundCm(w.angle),
+    })),
+    stairs: state.stairs.map((s) => ({
+      id: s.id,
+      xCm: roundCm(pxToCm(s.x)),
+      yCm: roundCm(pxToCm(s.y)),
+      lengthCm: roundCm(pxToCm(s.length)),
+      widthCm: roundCm(pxToCm(s.width)),
     })),
     doors: state.doors.map((d) => ({
       id: d.id,
@@ -1933,6 +2790,13 @@ function exportProject() {
       y1Cm: roundCm(pxToCm(a.y1)),
       x2Cm: roundCm(pxToCm(a.x2)),
       y2Cm: roundCm(pxToCm(a.y2)),
+    })),
+    measures: state.measures.map((m) => ({
+      id: m.id,
+      x1Cm: roundCm(pxToCm(m.x1)),
+      y1Cm: roundCm(pxToCm(m.y1)),
+      x2Cm: roundCm(pxToCm(m.x2)),
+      y2Cm: roundCm(pxToCm(m.y2)),
     })),
   };
 
@@ -2073,6 +2937,16 @@ function importProject(file) {
           angle: Number(w.angle) || 0,
         }));
 
+      state.stairs = Array.isArray(parsed.stairs)
+        ? parsed.stairs.map((s) => ({
+            id: String(s.id || createId('stair')),
+            x: Number.isFinite(s.xCm) ? cmToPx(Number(s.xCm)) : Number(s.x) || 260,
+            y: Number.isFinite(s.yCm) ? cmToPx(Number(s.yCm)) : Number(s.y) || 260,
+            length: Math.max(1, Number.isFinite(s.lengthCm) ? cmToPx(Number(s.lengthCm)) : Number(s.length) || cmToPx(STAIR_DEFAULTS_CM.length)),
+            width: Math.max(1, Number.isFinite(s.widthCm) ? cmToPx(Number(s.widthCm)) : Number(s.width) || cmToPx(STAIR_DEFAULTS_CM.width)),
+          }))
+        : [];
+
       state.exits = Array.isArray(parsed.exits)
         ? parsed.exits.map((e) => ({
             id: String(e.id || createId('exit')),
@@ -2101,6 +2975,15 @@ function importProject(file) {
             y2: Number.isFinite(a.y2Cm) ? cmToPx(Number(a.y2Cm)) : Number(a.y2) || 380,
           }))
         : [];
+      state.measures = Array.isArray(parsed.measures)
+        ? parsed.measures.map((m) => ({
+            id: String(m.id || createId('measure')),
+            x1: Number.isFinite(m.x1Cm) ? cmToPx(Number(m.x1Cm)) : Number(m.x1) || 200,
+            y1: Number.isFinite(m.y1Cm) ? cmToPx(Number(m.y1Cm)) : Number(m.y1) || 200,
+            x2: Number.isFinite(m.x2Cm) ? cmToPx(Number(m.x2Cm)) : Number(m.x2) || 300,
+            y2: Number.isFinite(m.y2Cm) ? cmToPx(Number(m.y2Cm)) : Number(m.y2) || 200,
+          }))
+        : [];
 
       state.backgroundDataUrl = String(parsed.backgroundDataUrl || '');
       bgImage.setAttribute('href', state.backgroundDataUrl);
@@ -2109,7 +2992,7 @@ function importProject(file) {
         height: Number(parsed.canvas?.height) || 800,
         zoom: Number(parsed.canvas?.zoom) || 1,
       };
-      state.selected = state.walls[0] ? { type: 'wall', id: state.walls[0].id } : null;
+      state.selected = firstSelectableEntity();
       commitStateChange();
     } catch (err) {
       alert('Could not import this file.');
@@ -2121,9 +3004,11 @@ function importProject(file) {
 
 function resetAll() {
   state.walls = [];
+  state.stairs = [];
   state.doors = [];
   state.exits = [];
   state.arrows = [];
+  state.measures = [];
   state.selected = null;
   state.canvas = { width: 1200, height: 800, zoom: 1 };
   state.pxPerCm = DEFAULT_PX_PER_CM;
@@ -2134,19 +3019,31 @@ function resetAll() {
 }
 
 addWallBtn.addEventListener('click', addWall);
+addStairBtn.addEventListener('click', addStair);
 addExitBtn.addEventListener('click', addExit);
 addArrowBtn.addEventListener('click', addArrow);
 addDoorBtn.addEventListener('click', addDoor);
 deleteWallBtn.addEventListener('click', deleteSelectedItem);
 duplicateBtn.addEventListener('click', duplicateSelected);
 undoBtn.addEventListener('click', undoLastChange);
-zoomOutBtn.addEventListener('click', () => setZoom(state.canvas.zoom - ZOOM_STEP));
-zoomInBtn.addEventListener('click', () => setZoom(state.canvas.zoom + ZOOM_STEP));
+zoomOutBtn.addEventListener('click', () => setZoom(state.canvas.zoom / ZOOM_FACTOR));
+zoomInBtn.addEventListener('click', () => setZoom(state.canvas.zoom * ZOOM_FACTOR));
 fitPlanBtn.addEventListener('click', fitCanvasToPlan);
+autoZoomBtn.addEventListener('click', autoZoomToPlan);
 applyScaleBtn.addEventListener('click', applyPxPerCmScale);
+preset4kmBtn.addEventListener('click', setCanvasTo4KmPreset);
 measureToggleBtn.addEventListener('click', toggleMeasureMode);
 clearMeasureBtn.addEventListener('click', clearMeasure);
 applyPropsBtn.addEventListener('click', applySelectedProperties);
+applyStairPropsBtn.addEventListener('click', applySelectedStairProperties);
+measureForm.addEventListener('submit', (evt) => {
+  evt.preventDefault();
+  applyMeasureDialog();
+  measureDialog.close();
+});
+measureCancelBtn.addEventListener('click', () => {
+  measureDialog.close();
+});
 
 editor.addEventListener('pointerdown', startDrag);
 editor.addEventListener('dragstart', (evt) => evt.preventDefault());
