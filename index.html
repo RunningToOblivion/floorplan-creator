@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fire Evacuation Plan Editor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Fire Evacuation Plan Editor</h1>
+      <p>Draw walls, exits, and evacuation arrows for a quick plan draft.</p>
+    </header>
+
+    <main class="layout">
+      <aside class="panel">
+        <details class="tool-section">
+          <summary>Background Plan</summary>
+          <div class="tool-content">
+          <label class="field">
+            <span>Upload architect plan (image)</span>
+            <input id="bgUpload" type="file" accept="image/*" />
+          </label>
+          <button id="clearBgBtn" type="button">Remove Background</button>
+          </div>
+        </details>
+
+        <details class="tool-section" open>
+          <summary>Drawing Tools</summary>
+          <div class="tool-content">
+          <div class="tool-row">
+            <button id="addWallBtn" type="button">Add Wall</button>
+            <button id="addExitBtn" type="button">Add Exit</button>
+          </div>
+          <div class="tool-row">
+            <button id="addArrowBtn" type="button">Add Arrow</button>
+            <button id="addDoorBtn" type="button">Add Door</button>
+          </div>
+          <div class="tool-row">
+            <button id="deleteWallBtn" type="button">Delete Selected</button>
+          </div>
+          <div class="tool-row single">
+            <button id="duplicateBtn" type="button">Duplicate Selected</button>
+          </div>
+          <div class="tool-row single">
+            <button id="undoBtn" type="button">Undo</button>
+          </div>
+          <p class="hint">Tip: drag walls/arrows to move. Drag blue endpoints to resize with snapping.</p>
+          <p class="hint">Copy/Paste: Ctrl+C and Ctrl+V (or Cmd+C/Cmd+V). Undo: Ctrl+Z.</p>
+          </div>
+        </details>
+
+        <details class="tool-section">
+          <summary>Measure Tool</summary>
+          <div class="tool-content">
+          <div class="tool-row">
+            <button id="measureToggleBtn" type="button">Measure: Off</button>
+            <button id="clearMeasureBtn" type="button">Clear Measure</button>
+          </div>
+          <p id="measureValue" class="hint">Distance: -</p>
+          <p class="hint">Click start point, then click end point. While measuring, move mouse for preview.</p>
+          </div>
+        </details>
+
+        <details class="tool-section">
+          <summary>Canvas</summary>
+          <div class="tool-content">
+          <label class="field">
+            <span>Scale (px per cm)</span>
+            <input id="pxPerCmInput" type="number" min="0.1" step="0.1" />
+          </label>
+          <button id="applyScaleBtn" type="button">Apply Scale To Design</button>
+          <div class="tool-row">
+            <button id="zoomOutBtn" type="button">Zoom -</button>
+            <button id="zoomInBtn" type="button">Zoom +</button>
+          </div>
+          <button id="fitPlanBtn" type="button">Fit To Plan</button>
+          <p id="zoomValue" class="hint">Zoom: 100%</p>
+          </div>
+        </details>
+
+        <details class="tool-section" open>
+          <summary>Selected Wall</summary>
+          <div class="tool-content">
+          <label class="field">
+            <span>Length (cm)</span>
+            <input id="lengthInput" type="number" min="1" step="0.1" />
+          </label>
+
+          <label class="field">
+            <span>Thickness (cm)</span>
+            <input id="thicknessInput" type="number" min="1" step="0.1" />
+          </label>
+
+          <label class="field">
+            <span>Orientation (°)</span>
+            <input id="angleInput" type="number" min="-180" max="180" step="1" />
+          </label>
+
+          <button id="applyPropsBtn" type="button">Apply Properties</button>
+          </div>
+        </details>
+
+        <details class="tool-section" open>
+          <summary>Project</summary>
+          <div class="tool-content">
+          <div class="tool-row">
+            <button id="exportBtn" type="button">Export JSON</button>
+            <button id="importBtn" type="button">Import JSON</button>
+          </div>
+          <button id="exportA3Btn" type="button">Export A3 Image (PNG)</button>
+          <input id="importFile" type="file" accept="application/json" hidden />
+          <button id="resetBtn" type="button" class="danger">Reset All</button>
+          </div>
+        </details>
+      </aside>
+
+      <section class="canvas-wrap">
+        <svg id="editor" viewBox="0 0 1200 800" aria-label="wall editor canvas">
+          <defs>
+            <marker id="arrowHead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+              <polygon points="0,0 12,4 0,8" fill="#dc2626"></polygon>
+            </marker>
+          </defs>
+          <image id="bgImage" href="" x="0" y="0" width="1200" height="800" preserveAspectRatio="xMidYMid meet"></image>
+          <g id="wallsLayer"></g>
+          <g id="doorsLayer"></g>
+          <g id="exitsLayer"></g>
+          <g id="arrowsLayer"></g>
+          <g id="measureLayer"></g>
+          <g id="handlesLayer"></g>
+        </svg>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
