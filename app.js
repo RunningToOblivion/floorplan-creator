@@ -28,6 +28,7 @@ const autoZoomBtn = document.getElementById('autoZoomBtn');
 const zoomValue = document.getElementById('zoomValue');
 const pxPerCmInput = document.getElementById('pxPerCmInput');
 const applyScaleBtn = document.getElementById('applyScaleBtn');
+const preset50mBtn = document.getElementById('preset50mBtn');
 const preset4kmBtn = document.getElementById('preset4kmBtn');
 const lengthInput = document.getElementById('lengthInput');
 const thicknessInput = document.getElementById('thicknessInput');
@@ -35,6 +36,7 @@ const angleInput = document.getElementById('angleInput');
 const applyPropsBtn = document.getElementById('applyPropsBtn');
 const stairLengthInput = document.getElementById('stairLengthInput');
 const stairWidthInput = document.getElementById('stairWidthInput');
+const stairAngleInput = document.getElementById('stairAngleInput');
 const applyStairPropsBtn = document.getElementById('applyStairPropsBtn');
 const measureDialog = document.getElementById('measureDialog');
 const measureForm = document.getElementById('measureForm');
@@ -73,6 +75,8 @@ const MAX_ZOOM = 600;
 const ZOOM_FACTOR = 1.25;
 const LARGE_CANVAS_SIDE_CM = 400000;
 const LARGE_CANVAS_TARGET_PX = 6000;
+const MEDIUM_CANVAS_SIDE_CM = 5000;
+const MEDIUM_CANVAS_TARGET_PX = 4000;
 
 const WALL_DEFAULTS_CM = {
   length: 300,
@@ -83,6 +87,7 @@ const WALL_DEFAULTS_CM = {
 const STAIR_DEFAULTS_CM = {
   length: 150,
   width: 120,
+  angle: 0,
 };
 
 const state = {
@@ -123,6 +128,11 @@ function roundCm(value) {
   return Math.round(Number(value) * 10) / 10;
 }
 
+function toFiniteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function cmToPx(cm) {
   return Number(cm) * state.pxPerCm;
 }
@@ -154,6 +164,37 @@ function endPoint(wall) {
     x: wall.x + Math.cos(rad) * wall.length,
     y: wall.y + Math.sin(rad) * wall.length,
   };
+}
+
+function rotatePoint(point, center, angleDeg) {
+  const rad = degToRad(angleDeg);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  return {
+    x: center.x + dx * cos - dy * sin,
+    y: center.y + dx * sin + dy * cos,
+  };
+}
+
+function stairCenter(stair) {
+  return {
+    x: stair.x + stair.length / 2,
+    y: stair.y + stair.width / 2,
+  };
+}
+
+function stairCorners(stair) {
+  const center = stairCenter(stair);
+  const rawCorners = [
+    { x: stair.x, y: stair.y },
+    { x: stair.x + stair.length, y: stair.y },
+    { x: stair.x + stair.length, y: stair.y + stair.width },
+    { x: stair.x, y: stair.y + stair.width },
+  ];
+
+  return rawCorners.map((corner) => rotatePoint(corner, center, stair.angle || 0));
 }
 
 function wallById(id) {
@@ -461,7 +502,7 @@ function updateInputs() {
   });
 
   const stairPropsDisabled = !stair;
-  [stairLengthInput, stairWidthInput, applyStairPropsBtn].forEach((el) => {
+  [stairLengthInput, stairWidthInput, stairAngleInput, applyStairPropsBtn].forEach((el) => {
     el.disabled = stairPropsDisabled;
   });
 
@@ -480,11 +521,13 @@ function updateInputs() {
   if (!stair) {
     stairLengthInput.value = '';
     stairWidthInput.value = '';
+    stairAngleInput.value = '';
     return;
   }
 
   stairLengthInput.value = roundCm(pxToCm(stair.length));
   stairWidthInput.value = roundCm(pxToCm(stair.width));
+  stairAngleInput.value = String(Math.round(stair.angle || 0));
 }
 
 function render() {
@@ -552,6 +595,13 @@ function render() {
   });
 
   state.stairs.forEach((stair) => {
+    const center = stairCenter(stair);
+    const angle = stair.angle || 0;
+    const stairGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    stairGroup.setAttribute('transform', `rotate(${angle} ${center.x} ${center.y})`);
+    stairGroup.dataset.id = stair.id;
+    stairGroup.dataset.kind = 'stair';
+
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', stair.x);
     rect.setAttribute('y', stair.y);
@@ -560,29 +610,56 @@ function render() {
     rect.setAttribute('class', `stair-rect ${state.selected?.type === 'stair' && stair.id === state.selected.id ? 'selected' : ''}`);
     rect.dataset.id = stair.id;
     rect.dataset.kind = 'stair';
-    stairsLayer.appendChild(rect);
+    stairGroup.appendChild(rect);
 
-    const stepCount = Math.max(3, Math.min(12, Math.round(stair.width / Math.max(1, screenPxToSvg(14)))));
-    for (let i = 1; i < stepCount; i += 1) {
-      const y = stair.y + (stair.width * i) / stepCount;
+    const stepSpacingPx = Math.max(1, cmToPx(28));
+    const stepCount = Math.floor(stair.width / stepSpacingPx);
+    for (let i = 1; i <= stepCount; i += 1) {
+      const y = stair.y + stepSpacingPx * i;
+      if (y >= stair.y + stair.width) {
+        break;
+      }
       const stepLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       stepLine.setAttribute('x1', stair.x);
       stepLine.setAttribute('y1', y);
       stepLine.setAttribute('x2', stair.x + stair.length);
       stepLine.setAttribute('y2', y);
       stepLine.setAttribute('class', 'stair-step-line');
-      stairsLayer.appendChild(stepLine);
+      stairGroup.appendChild(stepLine);
     }
 
+    stairsLayer.appendChild(stairGroup);
+
     if (state.selected?.type === 'stair' && stair.id === state.selected.id) {
+      const rotatedBottomRight = rotatePoint(
+        { x: stair.x + stair.length, y: stair.y + stair.width },
+        center,
+        angle,
+      );
       const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      handle.setAttribute('cx', stair.x + stair.length);
-      handle.setAttribute('cy', stair.y + stair.width);
+      handle.setAttribute('cx', rotatedBottomRight.x);
+      handle.setAttribute('cy', rotatedBottomRight.y);
       handle.setAttribute('r', uiHandleRadius);
       handle.setAttribute('class', 'handle');
       handle.dataset.id = stair.id;
       handle.dataset.kind = 'stair-handle';
       handlesLayer.appendChild(handle);
+
+      const normal = {
+        x: -Math.sin(degToRad(angle)),
+        y: Math.cos(degToRad(angle)),
+      };
+      const rotateDistance = screenPxToSvg(28);
+      const rotateHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      rotateHandle.setAttribute('cx', center.x + normal.x * rotateDistance);
+      rotateHandle.setAttribute('cy', center.y + normal.y * rotateDistance);
+      rotateHandle.setAttribute('r', rotateHandleRadius());
+      rotateHandle.setAttribute('class', 'handle rotate-handle');
+      rotateHandle.style.stroke = '#ffffff';
+      rotateHandle.style.strokeWidth = String(screenPxToSvg(1.2));
+      rotateHandle.dataset.id = stair.id;
+      rotateHandle.dataset.kind = 'stair-handle-rotate';
+      handlesLayer.appendChild(rotateHandle);
     }
   });
 
@@ -871,6 +948,7 @@ function addStair() {
     y: spawn.y - width / 2,
     length,
     width,
+    angle: STAIR_DEFAULTS_CM.angle,
   });
   state.selected = { type: 'stair', id };
   commitStateChange();
@@ -1770,7 +1848,9 @@ function startDrag(evt) {
   const wallHandleEnd = evt.target.closest('[data-kind="wall-handle-end"]');
   const wallHandleRotate = evt.target.closest('[data-kind="wall-handle-rotate"]');
   const stairRect = evt.target.closest('.stair-rect');
+  const stairGroup = evt.target.closest('[data-kind="stair"]');
   const stairHandle = evt.target.closest('[data-kind="stair-handle"]');
+  const stairRotateHandle = evt.target.closest('[data-kind="stair-handle-rotate"]');
   const doorSymbol = evt.target.closest('.door-symbol');
   const doorHandle = evt.target.closest('[data-kind="door-handle"]');
   const arrowLine = evt.target.closest('.arrow-line');
@@ -1833,8 +1913,24 @@ function startDrag(evt) {
     return;
   }
 
-  if (stairRect) {
-    const id = stairRect.dataset.id;
+  if (stairRotateHandle) {
+    const id = stairRotateHandle.dataset.id;
+    const stair = stairById(id);
+    if (!stair) {
+      return;
+    }
+    setSelection('stair', id);
+    state.dragMode = {
+      type: 'rotate-stair',
+      id,
+      center: stairCenter(stair),
+      didMutate: false,
+    };
+    return;
+  }
+
+  if (stairRect || stairGroup) {
+    const id = (stairRect || stairGroup).dataset.id;
     setSelection('stair', id);
     const stair = stairById(id);
     const pointer = svgPoint(evt);
@@ -1985,9 +2081,27 @@ function onPointerMove(evt) {
       return;
     }
 
+    const angle = stair.angle || 0;
+    const center = stairCenter(stair);
+    const localPointer = rotatePoint(pointer, center, -angle);
     const minSide = Math.max(1, cmToPx(10));
-    stair.length = Math.max(minSide, pointer.x - stair.x);
-    stair.width = Math.max(minSide, pointer.y - stair.y);
+    stair.length = Math.max(minSide, localPointer.x - stair.x);
+    stair.width = Math.max(minSide, localPointer.y - stair.y);
+    state.dragMode.didMutate = true;
+    state.snapGuide = null;
+    render();
+    return;
+  }
+
+  if (state.dragMode.type === 'rotate-stair') {
+    const stair = stairById(state.dragMode.id);
+    if (!stair) {
+      return;
+    }
+
+    const center = state.dragMode.center || stairCenter(stair);
+    const rawAngle = (Math.atan2(pointer.y - center.y, pointer.x - center.x) * 180) / Math.PI;
+    stair.angle = snapAngle(rawAngle + 90, null);
     state.dragMode.didMutate = true;
     state.snapGuide = null;
     render();
@@ -2279,6 +2393,7 @@ function cloneForPaste(type, data, offset) {
       y: data.y + offset,
       length: data.length,
       width: data.width,
+      angle: data.angle || 0,
     };
   }
 
@@ -2483,8 +2598,8 @@ function currentPlanBounds() {
   });
 
   state.stairs.forEach((stair) => {
-    includePoint(stair.x, stair.y);
-    includePoint(stair.x + stair.length, stair.y + stair.width);
+    const corners = stairCorners(stair);
+    corners.forEach((corner) => includePoint(corner.x, corner.y));
   });
 
   state.doors.forEach((door) => {
@@ -2624,6 +2739,19 @@ function setCanvasTo4KmPreset() {
   commitStateChange();
 }
 
+function setCanvasTo50mPreset() {
+  const nextPxPerCm = MEDIUM_CANVAS_TARGET_PX / MEDIUM_CANVAS_SIDE_CM;
+  const ratio = nextPxPerCm / state.pxPerCm;
+
+  applyScaleRatio(ratio);
+  state.pxPerCm = nextPxPerCm;
+  state.canvas.width = MEDIUM_CANVAS_TARGET_PX;
+  state.canvas.height = MEDIUM_CANVAS_TARGET_PX;
+  state.canvas.zoom = 1;
+
+  commitStateChange();
+}
+
 function onKeyDown(evt) {
   const tagName = evt.target?.tagName?.toLowerCase();
   if (tagName === 'input' || tagName === 'textarea') {
@@ -2708,6 +2836,7 @@ function applySelectedStairProperties() {
 
   const lengthCm = Number(stairLengthInput.value);
   const widthCm = Number(stairWidthInput.value);
+  const angleDeg = Number(stairAngleInput.value);
 
   if (!Number.isFinite(lengthCm) || lengthCm <= 0) {
     alert('Stair length must be a positive number.');
@@ -2719,8 +2848,14 @@ function applySelectedStairProperties() {
     return;
   }
 
+  if (!Number.isFinite(angleDeg)) {
+    alert('Stair orientation must be a number in degrees.');
+    return;
+  }
+
   stair.length = cmToPx(lengthCm);
   stair.width = cmToPx(widthCm);
+  stair.angle = angleDeg;
   commitStateChange();
 }
 
@@ -2770,6 +2905,7 @@ function exportProject() {
       yCm: roundCm(pxToCm(s.y)),
       lengthCm: roundCm(pxToCm(s.length)),
       widthCm: roundCm(pxToCm(s.width)),
+      angleDeg: roundCm(s.angle || 0),
     })),
     doors: state.doors.map((d) => ({
       id: d.id,
@@ -2917,34 +3053,69 @@ function importProject(file) {
       state.pxPerCm = Number(parsed.pxPerCm) > 0 ? Number(parsed.pxPerCm) : DEFAULT_PX_PER_CM;
 
       state.walls = parsed.walls
-        .filter((w) => Number.isFinite(w.x) || Number.isFinite(w.xCm))
-        .map((w) => ({
-          id: String(w.id || createId('wall')),
-          x: Number.isFinite(w.xCm) ? cmToPx(Number(w.xCm)) : Number(w.x),
-          y: Number.isFinite(w.yCm) ? cmToPx(Number(w.yCm)) : Number(w.y),
-          length: Math.max(
-            1,
-            Number.isFinite(w.lengthCm)
-              ? cmToPx(Number(w.lengthCm))
-              : Number(w.length) || cmToPx(WALL_DEFAULTS_CM.length),
-          ),
-          thickness: Math.max(
-            1,
-            Number.isFinite(w.thicknessCm)
-              ? cmToPx(Number(w.thicknessCm))
-              : Number(w.thickness) || cmToPx(WALL_DEFAULTS_CM.thickness),
-          ),
-          angle: Number(w.angle) || 0,
-        }));
+        .filter((w) => toFiniteNumber(w.x) !== null || toFiniteNumber(w.xCm) !== null)
+        .map((w) => {
+          const xCm = toFiniteNumber(w.xCm);
+          const yCm = toFiniteNumber(w.yCm);
+          const xPx = toFiniteNumber(w.x);
+          const yPx = toFiniteNumber(w.y);
+          const lengthCm = toFiniteNumber(w.lengthCm);
+          const lengthPxLegacy = toFiniteNumber(w.length);
+          const thicknessCm = toFiniteNumber(w.thicknessCm);
+          const thicknessPxLegacy = toFiniteNumber(w.thickness);
+
+          return {
+            id: String(w.id || createId('wall')),
+            x: xCm !== null ? cmToPx(xCm) : (xPx ?? 0),
+            y: yCm !== null ? cmToPx(yCm) : (yPx ?? 0),
+            length: Math.max(
+              1,
+              lengthCm !== null
+                ? cmToPx(lengthCm)
+                : (lengthPxLegacy ?? cmToPx(WALL_DEFAULTS_CM.length)),
+            ),
+            thickness: Math.max(
+              0.001,
+              thicknessCm !== null
+                ? cmToPx(thicknessCm)
+                : (thicknessPxLegacy ?? cmToPx(WALL_DEFAULTS_CM.thickness)),
+            ),
+            angle: toFiniteNumber(w.angle) ?? 0,
+          };
+        });
 
       state.stairs = Array.isArray(parsed.stairs)
-        ? parsed.stairs.map((s) => ({
-            id: String(s.id || createId('stair')),
-            x: Number.isFinite(s.xCm) ? cmToPx(Number(s.xCm)) : Number(s.x) || 260,
-            y: Number.isFinite(s.yCm) ? cmToPx(Number(s.yCm)) : Number(s.y) || 260,
-            length: Math.max(1, Number.isFinite(s.lengthCm) ? cmToPx(Number(s.lengthCm)) : Number(s.length) || cmToPx(STAIR_DEFAULTS_CM.length)),
-            width: Math.max(1, Number.isFinite(s.widthCm) ? cmToPx(Number(s.widthCm)) : Number(s.width) || cmToPx(STAIR_DEFAULTS_CM.width)),
-          }))
+        ? parsed.stairs.map((s) => {
+            const xCm = toFiniteNumber(s.xCm);
+            const yCm = toFiniteNumber(s.yCm);
+            const xPx = toFiniteNumber(s.x);
+            const yPx = toFiniteNumber(s.y);
+            const lengthCm = toFiniteNumber(s.lengthCm);
+            const widthCm = toFiniteNumber(s.widthCm);
+            const lengthPxLegacy = toFiniteNumber(s.length);
+            const widthPxLegacy = toFiniteNumber(s.width);
+            const angleDeg = toFiniteNumber(s.angleDeg);
+            const angleLegacy = toFiniteNumber(s.angle);
+
+            return {
+              id: String(s.id || createId('stair')),
+              x: xCm !== null ? cmToPx(xCm) : (xPx ?? 260),
+              y: yCm !== null ? cmToPx(yCm) : (yPx ?? 260),
+              length: Math.max(
+                1,
+                lengthCm !== null
+                  ? cmToPx(lengthCm)
+                  : (lengthPxLegacy ?? cmToPx(STAIR_DEFAULTS_CM.length)),
+              ),
+              width: Math.max(
+                1,
+                widthCm !== null
+                  ? cmToPx(widthCm)
+                  : (widthPxLegacy ?? cmToPx(STAIR_DEFAULTS_CM.width)),
+              ),
+              angle: angleDeg ?? angleLegacy ?? STAIR_DEFAULTS_CM.angle,
+            };
+          })
         : [];
 
       state.exits = Array.isArray(parsed.exits)
@@ -3031,6 +3202,7 @@ zoomInBtn.addEventListener('click', () => setZoom(state.canvas.zoom * ZOOM_FACTO
 fitPlanBtn.addEventListener('click', fitCanvasToPlan);
 autoZoomBtn.addEventListener('click', autoZoomToPlan);
 applyScaleBtn.addEventListener('click', applyPxPerCmScale);
+preset50mBtn.addEventListener('click', setCanvasTo50mPreset);
 preset4kmBtn.addEventListener('click', setCanvasTo4KmPreset);
 measureToggleBtn.addEventListener('click', toggleMeasureMode);
 clearMeasureBtn.addEventListener('click', clearMeasure);
